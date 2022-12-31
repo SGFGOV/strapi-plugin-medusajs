@@ -251,7 +251,48 @@ export async function sendSignalToMedusa(
     }
 }
 
+const lastSyncStarted = false;
+const lastSyncCompleted = false;
+const lastSyncTime = undefined;
+
+export function createServiceSyncs(data: any): Map<string, any> {
+    const serviceApis = new Map<string, any>();
+    const fields = Object.keys(data);
+    for (const field of fields) {
+        const strapiServiceNameParts = [];
+        const medusaServiceName = field.substring(0, field.length - 2);
+        const upperCaseMatcher = RegExp("[A-Z]");
+        const positions = medusaServiceName.matchAll(upperCaseMatcher);
+        let nextStartLetter = 0;
+        let endLetter = 0;
+        for (const post of positions) {
+            if (!post.index) {
+                endLetter = post.index ?? medusaServiceName.length - 1;
+            }
+            const word = medusaServiceName.substring(
+                nextStartLetter,
+                endLetter
+            );
+            nextStartLetter = endLetter + 1;
+            strapiServiceNameParts.push(word);
+        }
+        const lastWord = medusaServiceName.substring(
+            nextStartLetter,
+            medusaServiceName.length - 1
+        );
+        strapiServiceNameParts.push(lastWord);
+        const strapiServiceName = strapiServiceNameParts.join("-");
+
+        const serviceApi = `api::${strapiServiceName}.${strapiServiceName}`;
+        serviceApis.set(serviceApi, field);
+    }
+    return serviceApis;
+}
+
 export async function synchroniseWithMedusa(): Promise<boolean | undefined> {
+    const currentSyncTime = Date.now();
+    const syncInterval = 300e3; /** to be made configurable */
+
     const medusaServer = `${
         process.env.MEDUSA_BACKEND_URL || "http://localhost:9000"
     }`;
@@ -274,6 +315,14 @@ export async function synchroniseWithMedusa(): Promise<boolean | undefined> {
         return false;
         // process.exit(1)
     }
+    if (lastSyncStarted && !lastSyncCompleted) {
+        strapi.log.warn("already a sync is in progress");
+        return;
+    }
+    if (currentSyncTime - (lastSyncTime ?? 0) < syncInterval) {
+        strapi.log.warn("sync received too soon");
+        return;
+    }
     let seedData: AxiosResponse;
     try {
         strapi.log.info(
@@ -291,14 +340,15 @@ export async function synchroniseWithMedusa(): Promise<boolean | undefined> {
         return false;
     }
     // IMPORTANT: Order of seed must be maintained. Please don't change the order
-    const products = seedData?.data?.products;
+
+    try {
+        /*     const products = seedData?.data?.products;
     const regions = seedData?.data?.regions;
     const shippingOptions = seedData?.data?.shippingOptions;
     const paymentProviders = seedData?.data?.paymentProviders;
     const fulfillmentProviders = seedData?.data?.fulfillmentProviders;
     const shippingProfiles = seedData?.data?.shippingProfiles;
     const stores = seedData?.data?.stores;
-    try {
         const servicesToSync = {
             "api::fulfillment-provider.fulfillment-provider":
                 fulfillmentProviders,
@@ -308,22 +358,12 @@ export async function synchroniseWithMedusa(): Promise<boolean | undefined> {
             "api::shipping-profile.shipping-profile": shippingProfiles,
             "api::product.product": products,
             "api::store.store": stores
-        };
-        const strapiApiServicedDataRecievedFromMedusa =
-            Object.values(servicesToSync);
-        const strapiApiServicesNames = Object.keys(servicesToSync);
-        for (let i = 0; i < strapiApiServicesNames.length; i++) {
-            if (strapiApiServicedDataRecievedFromMedusa[i]) {
-                await strapi.services[strapiApiServicesNames[i]].bootstrap(
-                    strapiApiServicedDataRecievedFromMedusa[i]
-                );
-            }
-            {
-                strapi.log.info(
-                    `Nothing to sync ${strapiApiServicesNames[i]}  no data recieved`
-                );
-            }
-        }
+        };*/
+        const servicesToSync = createServiceSyncs(seedData.data);
+
+        servicesToSync.forEach(async (serviceData, serviceKey) => {
+            await strapi.services[serviceKey].bootstrap(serviceData);
+        });
         strapi.log.info("SYNC FINISHED");
         const result =
             (await sendSignalToMedusa("SYNC COMPLETED"))?.status == 200;
