@@ -252,7 +252,7 @@ export async function sendSignalToMedusa(
 }
 
 const lastSyncStarted = false;
-const lastSyncCompleted = false;
+let lastSyncCompleted = false;
 const lastSyncTime = undefined;
 
 export function createServiceSyncs(data: any): Map<string, any> {
@@ -317,11 +317,11 @@ export async function synchroniseWithMedusa(): Promise<boolean | undefined> {
     }
     if (lastSyncStarted && !lastSyncCompleted) {
         strapi.log.warn("already a sync is in progress");
-        return;
+        return true;
     }
     if (currentSyncTime - (lastSyncTime ?? 0) < syncInterval) {
         strapi.log.warn("sync received too soon");
-        return;
+        return true;
     }
     let seedData: AxiosResponse;
     try {
@@ -365,6 +365,7 @@ export async function synchroniseWithMedusa(): Promise<boolean | undefined> {
             await strapi.services[serviceKey].bootstrap(serviceData);
         });
         strapi.log.info("SYNC FINISHED");
+        lastSyncCompleted = true;
         const result =
             (await sendSignalToMedusa("SYNC COMPLETED"))?.status == 200;
         return result;
